@@ -63,6 +63,7 @@ printHelp() {
     echo "Usage: check_oracle_tablespace.sh -s SID [-d <regexp>] [-w <1-100>] [-c <1-100>]"
     echo
     echo "  -s  Oracle system identifier (SID)"
+    echo "  -u  Oracle username"
     echo "  -p  Oracle system password (using openssl passin syntax with pass:, file:, env:, and stdin options)"
     echo "  -d  which tablespaces/databases to check, defaults to all ($CMD_EGREP regexp)"
     echo "  -w  warning threshold (usage% as integer)"
@@ -115,15 +116,23 @@ checkOptions() {
         exit $STATE_UNKNOWN
     fi
 
-    while getopts s:d:w:c:p:lhvV OPT $@; do
+    while getopts s:d:w:c:u:p:lhvV OPT $@; do
             case $OPT in
                 s) # Oracle SID
                    ORACLE_SID="$OPTARG"
                    ;;
+                u) # Oracle USER
+                   ORACLE_USER="$OPTARG"
+                   ;;
 		p) # Oracle Password, openssl style
 		   case ${OPTARG%:*} in
 		       file)
-			   ORACLE_PASS=$(cat "${OPTARG#*:}")
+			   passwordFile=${OPTARG#*:}
+			   if [ ! -r "$passwordFile" ]; then
+			       echo "Error reading password file \`$passwordFile'"
+			       exit $STATE_UNKNOWN
+			   fi
+			   ORACLE_PASS=$(cat "$passwordFile")
 			   ;;
 		       env)
 			   varName=${OPTARG#*:}
