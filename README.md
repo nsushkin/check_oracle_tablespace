@@ -36,14 +36,4 @@ check_oracle_tablespace.sh -s SID -d 'FOO.*' -w 80 -c 90 -a
      `NAGIOS_HOME/libexec/check_oracle_tablespace.sh -s <SID> -w 90 -c 95`
   
   1. Configure Oracle tablespace checks in Nagios (and NRPE) settings.
-  
-## Known bugs ##
 
-Regular expressions for tablespace/database name (-d) are checked
-against a line consisting of database name, usage percentage and
-autoextensible status (YES/NO) with some whitespace between columns.
-To avoid mixing up autoextensible status with database names ending
-with letters 'YES' or 'NO' you would have to use something like
--d 'YES\ *[0-9]' instead of -d 'YES$'. The former would select
-all databases ending with 'YES' (like 'GOODBYES' or 'VAN_NYES') and
-the latter all databases which have autoextension turned on.
