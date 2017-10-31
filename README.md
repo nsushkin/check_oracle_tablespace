@@ -16,11 +16,11 @@ tablespace size allowed by autoextension, not the current size.
 ### Examples ###
 
 ``` bash
-# check_oracle_tablespace.sh -s SID -d 'FOO.*' -w 80 -c 90
-TABLESPACE CRITICAL: FOODB1 98% WARNING: FOODB2 82%; FOODB3 84%
+check_oracle_tablespace.sh -s SID -d 'FOO.*' -w 80 -c 90
+# TABLESPACE CRITICAL: FOODB1 98% WARNING: FOODB2 82%; FOODB3 84%
 
-# check_oracle_tablespace.sh -s SID -d 'FOO.*' -w 80 -c 90 -a
-TABLESPACE CRITICAL: FOODB1 AUTOEXT 91%
+check_oracle_tablespace.sh -s SID -d 'FOO.*' -w 80 -c 90 -a
+# TABLESPACE CRITICAL: FOODB1 AUTOEXT 91%
 ```
 
 ## Installation ##
@@ -32,11 +32,8 @@ TABLESPACE CRITICAL: FOODB1 AUTOEXT 91%
   1. Edit the script and fill in proper values for ORACLE_ORATAB,
      ORACLE_USER and ORACLE_PASS.
 	
-  1. Test plugin:
-``` bash
-NAGIOS_HOME/libexec/check_oracle_tablespace.sh -h
-NAGIOS_HOME/libexec/check_oracle_tablespace.sh -s <SID> -w 90 -c 95
-```
+  1. Test plugin: `NAGIOS_HOME/libexec/check_oracle_tablespace.sh -h`,
+     `NAGIOS_HOME/libexec/check_oracle_tablespace.sh -s <SID> -w 90 -c 95`
   
   1. Configure Oracle tablespace checks in Nagios (and NRPE) settings.
   
