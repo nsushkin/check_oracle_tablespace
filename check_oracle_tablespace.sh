@@ -2,8 +2,6 @@
 #
 # Nagios plugin to check Oracle tablespace usage.
 #
-# $Id: check_oracle_tablespace.sh,v 1.10 2008/11/10 12:53:54 kivimaki Exp $
-#
 # Copyright (C) 2006-2008  Hannu Kivimäki / CSC  - IT Center for Science Ltd.
 #
 # This program is free software; you can redistribute it and/or
@@ -24,13 +22,13 @@
 # ------------------------------ SETTINGS --------------------------------------
 
 # Oracle environment settings (could be parametrized)
-ORACLE_ORATAB="/var/opt/oracle/oratab"
-ORACLE_USER="username"
+ORACLE_ORATAB="/etc/oratab"
+ORACLE_USER="NAGIOS"
 ORACLE_PASS="password"
 
 # External commands
-CMD_AWK="/usr/bin/awk"
-CMD_EGREP="/usr/xpg4/bin/egrep"
+CMD_AWK="/bin/awk"
+CMD_EGREP="/bin/egrep"
 
 # Temporary work file (will be removed automatically)
 TEMP_FILE="/tmp/check_oracle_tablespace_$$.tmp"
@@ -50,10 +48,9 @@ CRIT_THRESHOLD=-1
 CRIT_EXCEEDED=0
 CRIT_STATE_TEXT=""
 CRIT_TRIGGER=0
-CHECK_AUTOEXTENSION=0
-IGNORE_NO_AUTOEXTENSION=0
 VERBOSE=0
 
+PLUGIN_VERSION=1.11
 # ------------------------------ FUNCTIONS -------------------------------------
 
 printInfo() {
@@ -63,22 +60,13 @@ printInfo() {
 
 printHelp() {
     echo
-    echo "Usage: check_oracle_tablespace.sh -s SID [-d <regexp>] [-w <1-100>] [-c <1-100>] [-a] [-i]"
+    echo "Usage: check_oracle_tablespace.sh -s SID [-d <regexp>] [-w <1-100>] [-c <1-100>]"
     echo
     echo "  -s  Oracle system identifier (SID)"
-    echo "  -d  which tablespaces/databases to check, defaults to all (/usr/xpg4/bin/egrep regexp)"
+    echo "  -p  Oracle system password (using openssl passin syntax with pass:, file:, env:, and stdin options)"
+    echo "  -d  which tablespaces/databases to check, defaults to all ($CMD_EGREP regexp)"
     echo "  -w  warning threshold (usage% as integer)"
     echo "  -c  critical threshold (usage% as integer)"
-    echo "  -a  check autoextension - if tablespace has autoextension enabled,"
-    echo "      usage is calculated using autoextension max size instead of"
-    echo "      current tablespace max size. All autoextensible tablespaces"
-    echo "      are also marked with AUTOEXT in status text. NOTE: If"
-    echo "      autoextension max size is set to unlimited, usage% is zero."
-    echo "  -i  ignore non-autoextensible tablespaces if the same db also"
-    echo "      has one or more tablespaces with autoextension enabled"
-    echo "      (to supress alerts in cases where a db might have both full,"
-    echo "      non-autoextensible tablespaces and some autoextensible"
-    echo "      tablespaces with room to expand)"
     echo
     echo "  -h  this help screen"
     echo "  -l  license info"
@@ -115,7 +103,7 @@ printLicense() {
 
 printVersion() {
     echo
-    echo "\$Id: check_oracle_tablespace.sh,v 1.10 2008/11/10 12:53:54 kivimaki Exp $"
+    echo "check_oracle_tablespace.sh $PLUGIN_VERSION"
     echo
 }
 
@@ -127,11 +115,31 @@ checkOptions() {
         exit $STATE_UNKNOWN
     fi
 
-    while getopts s:d:w:c:ailhvV OPT $@; do
+    while getopts s:d:w:c:p:lhvV OPT $@; do
             case $OPT in
                 s) # Oracle SID
                    ORACLE_SID="$OPTARG"
                    ;;
+		p) # Oracle Password, openssl style
+		   case ${OPTARG%:*} in
+		       file)
+			   ORACLE_PASS=$(cat "${OPTARG#*:}")
+			   ;;
+		       env)
+			   varName=${OPTARG#*:}
+			   ORACLE_PASS=${!varName}
+			   ;;
+		       pass)
+			   ORACLE_PASS=${OPTARG#*:}
+			   ;;
+		       stdin)
+			   ORACLE_PASS=$(cat)
+			   ;;
+		       *)
+			   ORACLE_PASS=$OPTARG
+			   ;;
+		   esac
+		   ;;
                 d) # Oracle databases (regular expression for egrep)
                    DB_REGEXP="$OPTARG"
                    ;;
@@ -229,11 +237,9 @@ export ORACLE_HOME
 #
 # 1 tablespace name
 # 2 usage % (=used/total) as integer
-# 3 usage % considering autoextension (=used/max) as integer
-# 4 autoextensible YES/NO
 #
-#  SOMETABLESPACE1          74 58 YES
-#  SOMETABLESPACE2          90 90  NO
+#  SOMETABLESPACE1          58
+#  SOMETABLESPACE2          90
 #  ...
 #
 if [ $VERBOSE -eq 1 ]; then
@@ -243,50 +249,42 @@ if [ ! -x "$ORACLE_HOME/bin/sqlplus" ]; then
     echo "Error: $ORACLE_HOME/bin/sqlplus not found or not executable."
     exit $STATE_UNKNOWN
 fi
-$ORACLE_HOME/bin/sqlplus $ORACLE_USER/$ORACLE_PASS <<EOF | $CMD_EGREP -i "$DB_REGEXP" | $CMD_EGREP "YES$|NO$" > $TEMP_FILE
-set linesize 80
-set pages 500
-set head off
+$ORACLE_HOME/bin/sqlplus -S $ORACLE_USER/\"$ORACLE_PASS\" <<EOF | $CMD_EGREP -i "$DB_REGEXP" > $TEMP_FILE
+set linesize 80 pages 500 head off echo off feedback off
+set sqlprompt ""
 
-column tablespace_name format a20
+column tablespace_name format a30
 column usage_pct       format 999
-column max_pct         format 999
-column autoextensible  format a5
-
 break on report
 
-select	df.TABLESPACE_NAME,
-        round(((df.BYTES - fs.BYTES) / df.BYTES) * 100) usage_pct,
-        round(decode(df.MAXBYTES, 34359721984, 0, (df.BYTES - fs.BYTES) / df.MAXBYTES * 100)) max_pct,
-        df.AUTOEXTENSIBLE
-from
-    (
-        select 	TABLESPACE_NAME,
-                sum(BYTES) BYTES,
-                AUTOEXTENSIBLE,
-                decode(AUTOEXTENSIBLE, 'YES', sum(MAXBYTES), sum(BYTES)) MAXBYTES
-        from 	dba_data_files
-        group 	by TABLESPACE_NAME,
-                AUTOEXTENSIBLE
-    )
-    df,
-    (
-        select 	TABLESPACE_NAME,
-                sum(BYTES) BYTES
-        from 	dba_free_space
-        group 	by TABLESPACE_NAME
-    )
-    fs
-where 	df.TABLESPACE_NAME=fs.TABLESPACE_NAME
-order 	by df.TABLESPACE_NAME asc
+SELECT 
+       df.tablespace_name,
+       round(100 * ( nvl(tu.totalusedspace, 0) / df.totalspace)) usage_pct
+FROM
+(SELECT tablespace_name,
+round(sum( decode(autoextensible, 'YES', maxbytes, 'NO', bytes) ) / 1048576) TotalSpace
+FROM dba_data_files
+GROUP BY tablespace_name) df,
+(SELECT round(sum(bytes)/(1024*1024)) totalusedspace, tablespace_name
+FROM dba_segments
+GROUP BY tablespace_name) tu
+WHERE df.tablespace_name = tu.tablespace_name (+)
+order by df.TABLESPACE_NAME asc
 /
 EOF
 if [ "`cat $TEMP_FILE`" = "" ]; then
     echo "Error: Empty result from sqlplus. Check plugin settings and Oracle status."
     exit $STATE_UNKNOWN
 fi
+  
 if [ $VERBOSE -eq 1 ]; then
     cat $TEMP_FILE
+fi
+
+errors=$($CMD_EGREP \^ORA- "$TEMP_FILE")
+if [ "$errors" ]; then
+    echo "Error: Oracle errors in result from sqlplus. Check permissions for user $ORACLE_USER: $errors"
+    exit $STATE_UNKNOWN
 fi
 
 # Loop through tablespace usage percentages and set a flag if thresholds
@@ -296,68 +294,35 @@ if [ $VERBOSE -eq 1 ]; then
     echo "Comparing usage percentages to threshold values..."
 fi
 column=0
-for row in `cat $TEMP_FILE`; do
-    column=`expr $column + 1`
-    case $column in
-        1) # tablespace name
-           ts=$row
-           ;;
-        2) # usage percentage
-           usage=$row
-           ;;
-        3) # usage percentage considering autoextension
-           autoext_usage=$row;
-           ;;
-        4) # autoextensible
-           autoext=$row
-           
-           # Reset column.
-           column=0
-           
-           # Skip non-autoextensible tablespaces if '-i' was specified and
-           # if same db has autoextensible tablespaces as well.
-           if [ $IGNORE_NO_AUTOEXTENSION -eq 1 ] && [ $autoext = "NO" ]; then
-                if [ "`$CMD_EGREP \"^$ts[[:space:]].*YES\$\" $TEMP_FILE`" != "" ]; then
-                    continue
-                fi
-           fi
+while read ts usage; do
+    if [ "$ts" = "" ] || [ "$usage" = "" ]; then continue; fi
+    if [ $CRIT_TRIGGER -eq 1 ] && [ "$usage" -ge $CRIT_THRESHOLD ]; then
+        # Critical threshold was exceeded. Append tablespace and usage
+        # to status text (shown in Nagios service status information).
+        CRIT_EXCEEDED=1
+        if [ "$CRIT_STATE_TEXT" != "" ]; then
+            CRIT_STATE_TEXT="${CRIT_STATE_TEXT}; ${ts} ${usage}%"
+        else
+            CRIT_STATE_TEXT="${CRIT_STATE_TEXT}${ts} ${usage}%"
+        fi
+        if [ $VERBOSE -eq 1 ]; then
+            echo "${ts} ${usage}% CRITICAL"
+        fi
 
-           # Decide which usage percentage to use.
-           if [ $CHECK_AUTOEXTENSION -eq 1 ] && [ $autoext = "YES" ]; then
-                usage=$autoext_usage
-                aetext="AUTOEXT "
-           else
-                aetext=""
-           fi
-           if [ $CRIT_TRIGGER -eq 1 ] && [ $usage -ge $CRIT_THRESHOLD ]; then
-              # Critical threshold was exceeded. Append tablespace and usage
-              # to status text (shown in Nagios service status information).
-              CRIT_EXCEEDED=1
-              if [ "$CRIT_STATE_TEXT" != "" ]; then
-                CRIT_STATE_TEXT="${CRIT_STATE_TEXT}; ${ts} ${aetext}${usage}%"
-              else
-                CRIT_STATE_TEXT="${CRIT_STATE_TEXT}${ts} ${aetext}${usage}%"
-              fi
-              if [ $VERBOSE -eq 1 ]; then
-                  echo "${ts} ${aetext}${usage}% CRITICAL"
-              fi
-
-           elif [ $WARN_TRIGGER -eq 1 ] && [ $usage -ge $WARN_THRESHOLD ]; then
-              # Warning threshold was exceeded. Append tablespace and usage
-              # to status text (shown in Nagios service status information).
-              WARN_EXCEEDED=1
-              if [ "$WARN_STATE_TEXT" != "" ]; then
-                WARN_STATE_TEXT="${WARN_STATE_TEXT}; ${ts} ${aetext}${usage}%"
-              else
-                WARN_STATE_TEXT="${WARN_STATE_TEXT}${ts} ${aetext}${usage}%"
-              fi              
-              if [ $VERBOSE -eq 1 ]; then
-                  echo "${ts} ${aetext}${usage}% WARNING"
-              fi
-           fi
-           ;;
-    esac
-done
+    elif [ $WARN_TRIGGER -eq 1 ] && [ "$usage" -ge $WARN_THRESHOLD ]; then
+        # Warning threshold was exceeded. Append tablespace and usage
+        # to status text (shown in Nagios service status information).
+        WARN_EXCEEDED=1
+        if [ "$WARN_STATE_TEXT" != "" ]; then
+            WARN_STATE_TEXT="${WARN_STATE_TEXT}; ${ts} ${usage}%"
+        else
+            WARN_STATE_TEXT="${WARN_STATE_TEXT}${ts} ${usage}%"
+        fi              
+        if [ $VERBOSE -eq 1 ]; then
+            echo "${ts} ${usage}% WARNING"
+        fi
+    fi
+done < "$TEMP_FILE"
 
 # Remove temporary work file.
 rm -f $TEMP_FILE
