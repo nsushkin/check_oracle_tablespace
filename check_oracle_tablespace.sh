@@ -51,6 +51,7 @@ CRIT_TRIGGER=0
 VERBOSE=0
 
 PLUGIN_VERSION=1.11
+ORACLE_ERROR_RE='^ORA-'
 # ------------------------------ FUNCTIONS -------------------------------------
 
 printInfo() {
@@ -258,7 +259,7 @@ if [ ! -x "$ORACLE_HOME/bin/sqlplus" ]; then
     echo "Error: $ORACLE_HOME/bin/sqlplus not found or not executable."
     exit $STATE_UNKNOWN
 fi
-$ORACLE_HOME/bin/sqlplus -S $ORACLE_USER/\"$ORACLE_PASS\" <<EOF | $CMD_EGREP -i "$DB_REGEXP" > $TEMP_FILE
+$ORACLE_HOME/bin/sqlplus -S $ORACLE_USER/\"$ORACLE_PASS\" <<EOF | $CMD_EGREP -i "$DB_REGEXP|$ORACLE_ERROR_RE" > $TEMP_FILE
 set linesize 80 pages 500 head off echo off feedback off
 set sqlprompt ""
 
@@ -283,6 +284,7 @@ order by df.TABLESPACE_NAME asc
 EOF
 if [ "`cat $TEMP_FILE`" = "" ]; then
     echo "Error: Empty result from sqlplus. Check plugin settings and Oracle status."
+    rm -f "$TEMP_FILE"
     exit $STATE_UNKNOWN
 fi
   
@@ -290,9 +292,10 @@ if [ $VERBOSE -eq 1 ]; then
     cat $TEMP_FILE
 fi
 
-errors=$($CMD_EGREP \^ORA- "$TEMP_FILE")
+errors=$($CMD_EGREP "$ORACLE_ERROR_RE" "$TEMP_FILE")
 if [ "$errors" ]; then
     echo "Error: Oracle errors in result from sqlplus. Check permissions for user $ORACLE_USER: $errors"
+    rm -f "$TEMP_FILE"
     exit $STATE_UNKNOWN
 fi
 
@@ -334,7 +337,7 @@ while read ts usage; do
 done < "$TEMP_FILE"
 
 # Remove temporary work file.
-rm -f $TEMP_FILE
+rm -f "$TEMP_FILE"
 
 # Print check results and exit.
 if [ $CRIT_EXCEEDED -eq 1 ]; then
