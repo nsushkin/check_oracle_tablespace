@@ -259,7 +259,7 @@ if [ ! -x "$ORACLE_HOME/bin/sqlplus" ]; then
     echo "Error: $ORACLE_HOME/bin/sqlplus not found or not executable."
     exit $STATE_UNKNOWN
 fi
-$ORACLE_HOME/bin/sqlplus -S $ORACLE_USER/\"$ORACLE_PASS\" <<EOF | $CMD_EGREP -i "$DB_REGEXP|$ORACLE_ERROR_RE" > $TEMP_FILE
+$ORACLE_HOME/bin/sqlplus -S $ORACLE_USER/\"$ORACLE_PASS\"@$ORACLE_SID <<EOF | $CMD_EGREP -i "$DB_REGEXP|$ORACLE_ERROR_RE" > $TEMP_FILE
 set linesize 80 pages 500 head off echo off feedback off
 set sqlprompt ""
 
